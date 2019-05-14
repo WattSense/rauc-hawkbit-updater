@@ -2,17 +2,16 @@
 #define __SD_HELPER_H__
 
 #include <glib-2.0/glib.h>
-#include <systemd/sd-event.h>
 #include <systemd/sd-daemon.h>
+#include <systemd/sd-event.h>
 
 /**
  * @brief Binding GSource and sd_event together.
  */
-struct SDSource
-{
-        GSource source;
-        sd_event *event;
-        GPollFD pollfd;
+struct SDSource {
+    GSource source;
+    sd_event* event;
+    GPollFD pollfd;
 };
 
 /**
@@ -24,7 +23,7 @@ struct SDSource
  * @see https://developer.gnome.org/glib/stable/glib-The-Main-Event-Loop.html#GMainLoop
  * @see https://developer.gnome.org/glib/stable/glib-The-Main-Event-Loop.html#GSource
  */
-int sd_source_attach(GSource *source, GMainLoop *loop);
+int sd_source_attach(GSource* source, GMainLoop* loop);
 
 /**
  * @brief Create GSource from a sd_event
@@ -34,6 +33,6 @@ int sd_source_attach(GSource *source, GMainLoop *loop);
  * @see https://www.freedesktop.org/software/systemd/man/sd-event.html
  * @see https://developer.gnome.org/glib/stable/glib-The-Main-Event-Loop.html#GSource
  */
-GSource * sd_source_new(sd_event *event);
+GSource* sd_source_new(sd_event* event);
 
-#endif // __SD_HELPER_H__
+#endif  // __SD_HELPER_H__

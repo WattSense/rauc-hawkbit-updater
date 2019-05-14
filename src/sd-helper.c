@@ -15,9 +15,8 @@
  * @param[in] timeout not used
  * @see https://developer.gnome.org/glib/stable/glib-The-Main-Event-Loop.html#GSource
  */
-static gboolean sd_source_prepare(GSource *source, gint *timeout)
-{
-        return sd_event_prepare(((struct SDSource *) source)->event) > 0 ? TRUE : FALSE;
+static gboolean sd_source_prepare(GSource* source, gint* timeout) {
+    return sd_event_prepare(((struct SDSource*)source)->event) > 0 ? TRUE : FALSE;
 };
 
 /**
@@ -26,9 +25,8 @@ static gboolean sd_source_prepare(GSource *source, gint *timeout)
  * @param[in] source sd_event_source that should be checked
  * @see https://developer.gnome.org/glib/stable/glib-The-Main-Event-Loop.html#GSource
  */
-static gboolean sd_source_check(GSource *source)
-{
-        return sd_event_wait(((struct SDSource *) source)->event, 0) > 0 ? TRUE : FALSE;
+static gboolean sd_source_check(GSource* source) {
+    return sd_event_wait(((struct SDSource*)source)->event, 0) > 0 ? TRUE : FALSE;
 };
 
 /**
@@ -39,13 +37,9 @@ static gboolean sd_source_check(GSource *source)
  * @param[in] userdata not used
  * @see https://developer.gnome.org/glib/stable/glib-The-Main-Event-Loop.html#GSource
  */
-static gboolean sd_source_dispatch(GSource *source,
-                                   GSourceFunc callback,
-                                   gpointer userdata)
-{
-        return sd_event_dispatch(((struct SDSource *) source)->event) >= 0
-               ? G_SOURCE_CONTINUE
-               : G_SOURCE_REMOVE;
+static gboolean sd_source_dispatch(GSource* source, GSourceFunc callback, gpointer userdata) {
+    return sd_event_dispatch(((struct SDSource*)source)->event) >= 0 ? G_SOURCE_CONTINUE
+                                                                     : G_SOURCE_REMOVE;
 };
 
 /**
@@ -54,9 +48,8 @@ static gboolean sd_source_dispatch(GSource *source,
  * @param[in] source sd_event_source that should be finalized
  * @see https://developer.gnome.org/glib/stable/glib-The-Main-Event-Loop.html#GSource
  */
-static void sd_source_finalize(GSource *source)
-{
-        sd_event_unref(((struct SDSource *) source)->event);
+static void sd_source_finalize(GSource* source) {
+    sd_event_unref(((struct SDSource*)source)->event);
 };
 
 /**
@@ -67,14 +60,13 @@ static void sd_source_finalize(GSource *source)
  * @return Always return 0
  * @see https://developer.gnome.org/glib/stable/glib-The-Main-Event-Loop.html#GMainLoop
  */
-static int sd_source_on_exit(sd_event_source *source, void *userdata)
-{
-        g_main_loop_quit(userdata);
+static int sd_source_on_exit(sd_event_source* source, void* userdata) {
+    g_main_loop_quit(userdata);
 
-        sd_event_source_set_enabled(source, FALSE);
-        sd_event_source_unref(source);
+    sd_event_source_set_enabled(source, FALSE);
+    sd_event_source_unref(source);
 
-        return 0;
+    return 0;
 };
 
 /**
@@ -86,16 +78,12 @@ static int sd_source_on_exit(sd_event_source *source, void *userdata)
  * @see https://developer.gnome.org/glib/stable/glib-The-Main-Event-Loop.html#GMainLoop
  * @see https://developer.gnome.org/glib/stable/glib-The-Main-Event-Loop.html#GSource
  */
-int sd_source_attach(GSource *source, GMainLoop *loop)
-{
-        g_source_set_name(source, "sd-event");
-        g_source_add_poll(source, &((struct SDSource *) source)->pollfd);
-        g_source_attach(source, g_main_loop_get_context(loop));
+int sd_source_attach(GSource* source, GMainLoop* loop) {
+    g_source_set_name(source, "sd-event");
+    g_source_add_poll(source, &((struct SDSource*)source)->pollfd);
+    g_source_attach(source, g_main_loop_get_context(loop));
 
-        return sd_event_add_exit(((struct SDSource *) source)->event,
-                                 NULL,
-                                 sd_source_on_exit,
-                                 loop);
+    return sd_event_add_exit(((struct SDSource*)source)->event, NULL, sd_source_on_exit, loop);
 };
 
 /**
@@ -106,20 +94,19 @@ int sd_source_attach(GSource *source, GMainLoop *loop)
  * @see https://www.freedesktop.org/software/systemd/man/sd-event.html
  * @see https://developer.gnome.org/glib/stable/glib-The-Main-Event-Loop.html#GSource
  */
-GSource * sd_source_new(sd_event *event)
-{
-        static GSourceFuncs funcs = {
-                sd_source_prepare,
-                sd_source_check,
-                sd_source_dispatch,
-                sd_source_finalize,
-        };
-        GSource *s = g_source_new(&funcs, sizeof(struct SDSource));
-        if (s) {
-                ((struct SDSource *) s)->event = sd_event_ref(event);
-                ((struct SDSource *) s)->pollfd.fd = sd_event_get_fd(event);
-                ((struct SDSource *) s)->pollfd.events = G_IO_IN | G_IO_HUP;
-        }
+GSource* sd_source_new(sd_event* event) {
+    static GSourceFuncs funcs = {
+        sd_source_prepare,
+        sd_source_check,
+        sd_source_dispatch,
+        sd_source_finalize,
+    };
+    GSource* s = g_source_new(&funcs, sizeof(struct SDSource));
+    if (s) {
+        ((struct SDSource*)s)->event = sd_event_ref(event);
+        ((struct SDSource*)s)->pollfd.fd = sd_event_get_fd(event);
+        ((struct SDSource*)s)->pollfd.events = G_IO_IN | G_IO_HUP;
+    }
 
-        return s;
+    return s;
 };

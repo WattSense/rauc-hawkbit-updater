@@ -7,6 +7,6 @@
 #include <systemd/sd-journal.h>
 #endif
 
-void setup_logging(const gchar *domain, GLogLevelFlags level, gboolean output_to_systemd);
+void setup_logging(const gchar* domain, GLogLevelFlags level, gboolean output_to_systemd);
 
-#endif // __LOG_H__
+#endif  // __LOG_H__
