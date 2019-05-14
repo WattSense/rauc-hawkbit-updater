@@ -17,6 +17,8 @@
 #define PROGRAM "rauc-hawkbit-updater"
 #define VERSION 0.1
 
+#define WATTSENSE
+
 // program arguments
 static gchar* config_file = NULL;
 static gboolean opt_version = FALSE;
@@ -42,6 +44,53 @@ static GOptionEntry entries[] = {
 // hawkbit callbacks
 static GSourceFunc notify_hawkbit_install_progress;
 static GSourceFunc notify_hawkbit_install_complete;
+
+#ifdef WATTSENSE
+static gint read_apps_version(gchar** apps_version) {
+    const gchar* filename = "/opt/wattsense/app-version.txt";
+    gsize len;
+    FILE* f;
+    GError* error = NULL;
+
+    if (!g_file_get_contents(filename, apps_version, &len, &error)) {
+        g_error("g_file_get_contents() failed: %s", error->message);
+        return false;
+    }
+    if (len == 0) {
+        *apps_version = g_strdup("error");
+        return false;
+    } else
+        return true;
+}
+
+static gint read_rootfs_version(gchar** rootfs_version) {
+    const gchar* filename = "/etc/os-release";
+    gchar line[128];
+    gsize len;
+    FILE* fp;
+    GError* error = NULL;
+
+    fp = g_fopen(filename, "r");
+    if (fp == NULL) {
+        *rootfs_version = g_strdup("error");
+        return false;
+    }
+    while (!feof(fp)) {
+        char version[32];
+
+        fgets(line, 128, fp);
+        if (sscanf(line, "VERSION_ID=\"%32[^\"]\"", version) != 0) {
+            fclose(fp);
+            *rootfs_version = g_strdup(version);
+            return true;
+        }
+    }
+
+    fclose(fp);
+    *rootfs_version = g_strdup("error");
+    return false;
+}
+#endif
 
 /**
  * @brief RAUC callback when new progress.
@@ -94,6 +143,8 @@ int main(int argc, char** argv) {
     gint exit_code = 0;
     gchar** args;
     GLogLevelFlags log_level;
+    gchar* apps_version;
+    gchar* apps_rootfs;
 
     // Lets support unicode filenames
     args = g_strdupv(argv);
@@ -112,6 +163,7 @@ int main(int argc, char** argv) {
         goto out;
     }
 
+#ifndef WATTSENSE
     if (!g_file_test(config_file, G_FILE_TEST_EXISTS)) {
         g_printerr("No such configuration file: %s\n", config_file);
         exit_code = 3;
@@ -130,7 +182,35 @@ int main(int argc, char** argv) {
         exit_code = 4;
         goto out;
     }
+#else
+    /* Create hardcoded config for Wattsense */
 
+    if (!device_id_init()) {
+        exit_code = 5;
+        goto out;
+    }
+    struct config* config = g_new0(struct config, 1);
+
+    config->controller_id = g_new(char, 32);
+    g_stpcpy(config->controller_id, device_id_get());
+    config->auth_token = g_new(char, 32);
+    g_stpcpy(config->auth_token, device_id_get());
+    config->ssl = true;
+    config->ssl_verify = true;
+    config->hawkbit_server = g_strdup("eagle.wattsense.com");
+    config->tenant_id = g_strdup("DEFAULT");
+    config->bundle_download_location = g_strdup("/tmp/bundle.raucb");
+    config->connect_timeout = 40;  // in sec
+    config->timeout = 60;
+    config->retry_wait = 60;
+    config->log_level = G_LOG_LEVEL_ERROR | G_LOG_LEVEL_CRITICAL | G_LOG_LEVEL_WARNING;
+    config->device = g_hash_table_new(g_str_hash, g_str_equal);
+    read_apps_version(&apps_version);
+    g_hash_table_insert(config->device, "APP_VERS", g_strstrip(apps_version));
+    read_rootfs_version(&apps_rootfs);
+    g_hash_table_insert(config->device, "ROOTFS_VERS", g_strstrip(apps_rootfs));
+
+#endif
     if (opt_debug) {
         log_level = G_LOG_LEVEL_MASK;
     } else {
@@ -139,9 +219,15 @@ int main(int argc, char** argv) {
 
     setup_logging(PROGRAM, log_level, opt_output_systemd);
     hawkbit_init(config, on_new_software_ready_cb);
+
+    identify(); /* Identify ourselve to push new attibuts */
+    force_check_run = true;
     hawkbit_start_service_sync();
 
+#ifndef WATTSENSE
     config_file_free(config);
+#endif
+
 out:
     g_option_context_free(context);
     g_strfreev(args);

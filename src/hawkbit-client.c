@@ -53,11 +53,12 @@ long get_available_space(const char* path) {
  */
 size_t curl_write_to_file_cb(void* ptr, size_t size, size_t nmemb, struct get_binary* data) {
     size_t written = fwrite(ptr, size, nmemb, data->fp);
-    data->written += written;
+    data->written += (gint64)written;
     if (data->checksum) {
         g_checksum_update(data->checksum, ptr, written);
     }
-    //g_debug("Bytes downloaded: %ld, (%3.f %%)", data->written, ((double) data->written / data->size * 100));
+    g_debug("Bytes downloaded: %ld, (%3.f %%)", (long int)data->written,
+            ((double)data->written / (double)data->filesize * 100.0));
     return written;
 }
 
@@ -75,6 +76,13 @@ gint get_binary(const gchar* download_url,
                 gint64 filesize,
                 struct get_binary_checksum* checksum,
                 GError** error) {
+    gchar* download_url_updated;
+    gchar** download_url_split;
+
+    download_url_split = g_strsplit(download_url, "/", -1);
+    g_stpcpy(download_url_split[2], hawkbit_config->hawkbit_server);
+    download_url_updated = g_strjoinv("/", download_url_split);
+
     FILE* fp = fopen(file, "wb");
     if (fp == NULL) {
         g_debug("Failed to open file for download: %s\n", file);
@@ -91,10 +99,11 @@ gint get_binary(const gchar* download_url,
         .written = 0,
         .checksum = (checksum != NULL ? g_checksum_new(checksum->checksum_type) : NULL)};
 
-    curl_easy_setopt(curl, CURLOPT_URL, download_url);
+    curl_easy_setopt(curl, CURLOPT_URL, download_url_updated);
     curl_easy_setopt(curl, CURLOPT_USERAGENT, HAWKBIT_USERAGENT);
     curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, hawkbit_config->connect_timeout);
     curl_easy_setopt(curl, CURLOPT_BUFFERSIZE, DEFAULT_CURL_DOWNLOAD_BUFFER_SIZE);
+    curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, curl_write_to_file_cb);
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, &gb);
     curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, hawkbit_config->ssl_verify ? 1L : 0L);
@@ -188,6 +197,7 @@ gint rest_request(enum HTTPMethod method,
 
     // setup CURL options
     curl_easy_setopt(curl, CURLOPT_URL, url);
+    curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
     curl_easy_setopt(curl, CURLOPT_USERAGENT, HAWKBIT_USERAGENT);
     curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, HTTPMethod_STRING[method]);
     curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, hawkbit_config->connect_timeout);
@@ -248,7 +258,7 @@ gint rest_request(enum HTTPMethod method,
                     http_code, "HTTP request failed: %s", curl_easy_strerror(res));
     }
 
-    //g_debug("Response body: %s\n", fetch_buffer.payload);
+    g_debug("Response body: %s\n", fetch_buffer.payload);
 
     g_free(fetch_buffer.payload);
     g_free(postdata);
@@ -494,8 +504,8 @@ gpointer download_thread(gpointer data) {
     GError** error = NULL;
     g_autofree gchar* msg = NULL;
     struct artifact* artifact = data;
-    g_message("Start downloading: %s", artifact->download_url);
 
+    g_message("Start downloading: %s", artifact->download_url);
     // setup checksum
     struct get_binary_checksum checksum = {.checksum_result = NULL,
                                            .checksum_type = G_CHECKSUM_SHA1};
