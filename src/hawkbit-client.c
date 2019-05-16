@@ -111,6 +111,10 @@ gint get_binary(const gchar* download_url,
     /* abort if slower than 100 bytes/sec during 60 seconds */
     curl_easy_setopt(curl, CURLOPT_LOW_SPEED_TIME, 60L);
     curl_easy_setopt(curl, CURLOPT_LOW_SPEED_LIMIT, 100L);
+
+    /* BOX-576: Limit speed to 100kB/s */
+    curl_easy_setopt(curl, CURLOPT_MAX_RECV_SPEED_LARGE, (curl_off_t)100000);
+
     // Setup request headers
     struct curl_slist* headers = NULL;
     headers = curl_slist_append(headers, "Accept: application/octet-stream");
