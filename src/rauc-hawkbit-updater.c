@@ -55,11 +55,15 @@ static gint read_apps_version(gchar** apps_version) {
     GError* error = NULL;
 
     if (!g_file_get_contents(filename, apps_version, &len, &error)) {
-        g_error("g_file_get_contents() failed: %s", error->message);
+    	if (error != NULL) {
+    		g_printerr("Unable to read file: %s\n", error->message);
+   		    g_error_free (error);
+    	}
+        *apps_version = g_strdup("0.0.0");
         return false;
     }
     if (len == 0) {
-        *apps_version = g_strdup("error");
+        *apps_version = g_strdup("0.0.0");
         return false;
     } else
         return true;
@@ -74,7 +78,7 @@ static gint read_rootfs_version(gchar** rootfs_version) {
 
     fp = g_fopen(filename, "r");
     if (fp == NULL) {
-        *rootfs_version = g_strdup("error");
+        *rootfs_version = g_strdup("0.0.0");
         return false;
     }
     while (!feof(fp)) {
@@ -89,7 +93,7 @@ static gint read_rootfs_version(gchar** rootfs_version) {
     }
 
     fclose(fp);
-    *rootfs_version = g_strdup("error");
+    *rootfs_version = g_strdup("0.0.0");
     return false;
 }
 #endif
