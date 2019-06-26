@@ -9,6 +9,8 @@
 #include <glib-2.0/glib.h>
 #include <stdbool.h>
 #include <stdio.h>
+#include <unistd.h>
+#include <sys/reboot.h>
 #include "config-file.h"
 #include "hawkbit-client.h"
 #include "log.h"
@@ -114,6 +116,8 @@ static gboolean on_rauc_install_progress_cb(gpointer data) {
 /**
  * @brief RAUC callback when install is complete.
  */
+#define FILE_DO_REBOOT "/tmp/.do_reboot"
+
 static gboolean on_rauc_install_complete_cb(gpointer data) {
     struct install_context* context = data;
 
@@ -121,6 +125,11 @@ static gboolean on_rauc_install_complete_cb(gpointer data) {
                                                         (context->status_result == 0)};
     // lets notify hawkbit with install result
     notify_hawkbit_install_complete(&userdata);
+
+    if( access(FILE_DO_REBOOT, F_OK ) != -1 ) {
+    	sync();
+    	reboot(RB_AUTOBOOT);
+    }
 
     return G_SOURCE_REMOVE;
 }
