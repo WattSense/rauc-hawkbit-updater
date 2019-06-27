@@ -437,10 +437,19 @@ gboolean hawkbit_progress(const gchar* msg) {
 }
 
 gboolean identify(GError** error) {
+    gchar* apps_version;
+    gchar* apps_rootfs;
+
     g_debug("Identifying ourself to hawkbit server");
     g_autofree gchar* put_config_data_url =
         build_api_url(g_strdup_printf("/%s/controller/v1/%s/configData", hawkbit_config->tenant_id,
                                       hawkbit_config->controller_id));
+
+    /* Update versions */
+    read_apps_version(&apps_version);
+    g_hash_table_replace(hawkbit_config->device, "APP_VERS", g_strstrip(apps_version));
+    read_rootfs_version(&apps_rootfs);
+    g_hash_table_replace(hawkbit_config->device, "ROOTFS_VERS", g_strstrip(apps_rootfs));
 
     JsonBuilder* builder = json_builder_new();
     json_build_status(builder, NULL, NULL, "success", "closed", hawkbit_config->device, FALSE);

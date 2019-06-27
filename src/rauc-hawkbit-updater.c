@@ -17,7 +17,7 @@
 #include "rauc-installer.h"
 
 #define PROGRAM "rauc-hawkbit-updater"
-#define VERSION 0.1
+#define VERSION 0.2
 
 #define WATTSENSE
 
@@ -48,7 +48,7 @@ static GSourceFunc notify_hawkbit_install_progress;
 static GSourceFunc notify_hawkbit_install_complete;
 
 #ifdef WATTSENSE
-static gint read_apps_version(gchar** apps_version) {
+gint read_apps_version(gchar** apps_version) {
     const gchar* filename = "/opt/wattsense/app-version.txt";
     gsize len;
     FILE* f;
@@ -69,7 +69,7 @@ static gint read_apps_version(gchar** apps_version) {
         return true;
 }
 
-static gint read_rootfs_version(gchar** rootfs_version) {
+gint read_rootfs_version(gchar** rootfs_version) {
     const gchar* filename = "/etc/os-release";
     gchar line[128];
     gsize len;
