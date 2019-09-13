@@ -727,8 +727,9 @@ static gboolean hawkbit_pull_cb(gpointer data) {
         "/%s/controller/v1/%s", hawkbit_config->tenant_id, hawkbit_config->controller_id));
     GError* error = NULL;
     JsonParser* json_response_parser = NULL;
-
+#if 0 // disable message too garrulous
     g_message("Checking for new software...");
+#endif
     int status = rest_request(GET, get_tasks_url, NULL, &json_response_parser, &error);
     if (status == 200) {
         if (json_response_parser) {
@@ -745,9 +746,12 @@ static gboolean hawkbit_pull_cb(gpointer data) {
             if (json_contains(json_root, "$._links.deploymentBase")) {
                 // hawkBit has a new deployment for us
                 process_deployment(json_root, &error);
-            } else {
+            }
+#if 0 // disable message too garrulous
+            else {
                 g_message("No new software.");
             }
+#endif
             if (json_contains(json_root, "$._links.cancelAction")) {
                 //TODO: implement me
                 g_warning("cancel action not supported");
