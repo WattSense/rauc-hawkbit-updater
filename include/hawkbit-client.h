@@ -96,6 +96,7 @@ void hawkbit_start_service_sync();
 gboolean hawkbit_progress(const gchar* msg);
 gboolean install_complete_cb(gpointer ptr);
 
+gint read_hw_version(gchar** hw_version);
 gint read_apps_version(gchar** apps_version);
 gint read_rootfs_version(gchar** rootfs_version);
 #endif  // __HAWKBIT_CLIENT_H__

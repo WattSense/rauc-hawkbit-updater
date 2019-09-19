@@ -433,6 +433,7 @@ gboolean hawkbit_progress(const gchar* msg) {
 }
 
 gboolean identify(GError** error) {
+    gchar* hw_version;
     gchar* apps_version;
     gchar* apps_rootfs;
 
@@ -442,6 +443,8 @@ gboolean identify(GError** error) {
                                       hawkbit_config->controller_id));
 
     /* Update versions */
+    read_hw_version(&hw_version);
+    g_hash_table_replace(hawkbit_config->device, "HW_NAME", g_strstrip(hw_version));
     read_apps_version(&apps_version);
     g_hash_table_replace(hawkbit_config->device, "APP_VERS", g_strstrip(apps_version));
     read_rootfs_version(&apps_rootfs);
