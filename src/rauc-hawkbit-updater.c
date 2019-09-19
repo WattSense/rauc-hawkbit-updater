@@ -9,11 +9,13 @@
 #include <glib-2.0/glib.h>
 #include <stdbool.h>
 #include <stdio.h>
-#include <unistd.h>
 #include <sys/reboot.h>
+#include <sys/utsname.h>
+#include <unistd.h>
 #include "config-file.h"
 #include "hawkbit-client.h"
 #include "log.h"
+#include "device_id.h"
 #include "rauc-installer.h"
 
 #define PROGRAM "rauc-hawkbit-updater"
@@ -48,17 +50,29 @@ static GSourceFunc notify_hawkbit_install_progress;
 static GSourceFunc notify_hawkbit_install_complete;
 
 #ifdef WATTSENSE
+gint read_hw_version(gchar** hw_version) {
+    struct utsname unameData;
+    int err;
+
+    err = uname(&unameData);
+    if (err == 0)
+        *hw_version = g_strdup(unameData.nodename);
+    else
+        *hw_version = g_strdup("unknown");
+
+    return true;
+}
+
 gint read_apps_version(gchar** apps_version) {
     const gchar* filename = "/opt/wattsense/app-version.txt";
     gsize len;
-    FILE* f;
     GError* error = NULL;
 
     if (!g_file_get_contents(filename, apps_version, &len, &error)) {
-    	if (error != NULL) {
-    		g_printerr("Unable to read file: %s\n", error->message);
-   		    g_error_free (error);
-    	}
+        if (error != NULL) {
+            g_printerr("Unable to read file: %s\n", error->message);
+            g_error_free(error);
+        }
         *apps_version = g_strdup("0.0.0");
         return false;
     }
@@ -72,9 +86,7 @@ gint read_apps_version(gchar** apps_version) {
 gint read_rootfs_version(gchar** rootfs_version) {
     const gchar* filename = "/etc/os-release";
     gchar line[128];
-    gsize len;
     FILE* fp;
-    GError* error = NULL;
 
     fp = g_fopen(filename, "r");
     if (fp == NULL) {
@@ -130,9 +142,9 @@ static gboolean on_rauc_install_complete_cb(gpointer data) {
     // lets notify hawkbit with install result
     notify_hawkbit_install_complete(&userdata);
 
-    if( access(FILE_DO_REBOOT, F_OK ) != -1 ) {
-    	sync();
-    	reboot(RB_AUTOBOOT);
+    if (access(FILE_DO_REBOOT, F_OK) != -1) {
+        sync();
+        reboot(RB_AUTOBOOT);
     }
 
     return G_SOURCE_REMOVE;
@@ -156,6 +168,7 @@ int main(int argc, char** argv) {
     gint exit_code = 0;
     gchar** args;
     GLogLevelFlags log_level;
+    gchar* hw_version;
     gchar* apps_version;
     gchar* apps_rootfs;
 
@@ -218,6 +231,8 @@ int main(int argc, char** argv) {
     config->retry_wait = 60;
     config->log_level = G_LOG_LEVEL_ERROR | G_LOG_LEVEL_CRITICAL | G_LOG_LEVEL_WARNING;
     config->device = g_hash_table_new(g_str_hash, g_str_equal);
+    read_hw_version(&hw_version);
+    g_hash_table_insert(config->device, "HW_NAME", g_strstrip(hw_version));
     read_apps_version(&apps_version);
     g_hash_table_insert(config->device, "APP_VERS", g_strstrip(apps_version));
     read_rootfs_version(&apps_rootfs);
