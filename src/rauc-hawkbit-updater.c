@@ -223,9 +223,9 @@ int main(int argc, char** argv) {
     g_stpcpy(config->auth_token, device_id_get());
     config->ssl = true;
     config->ssl_verify = true;
-    config->hawkbit_server = g_strdup("eagle.wattsense.com");
+    config->hawkbit_server = g_strdup(HAWKBIT_SERVER);
     config->tenant_id = g_strdup("DEFAULT");
-    config->bundle_download_location = g_strdup("/tmp/bundle.raucb");
+    config->bundle_download_location = g_strdup(DEFAULT_DOWNLOAD_LOCATION);
     config->connect_timeout = 40;  // in sec
     config->timeout = 60;
     config->retry_wait = 60;

@@ -572,6 +572,7 @@ down_error:
 
 gboolean process_deployment(JsonNode* req_root, GError** error) {
     struct artifact* artifact = NULL;
+    gboolean use_rescue_location = FALSE;
 
     if (action_id) {
         g_warning("Deployment is already in progress...");
@@ -657,18 +658,41 @@ gboolean process_deployment(JsonNode* req_root, GError** error) {
               ", URL: %s)",
               artifact->name, artifact->version, artifact->size, artifact->download_url);
 
+    // Wattsense: test if directory exists if not change location to RESCUE Location
+    gchar* current_download_dir = NULL;
+
+    current_download_dir = g_path_get_dirname(hawkbit_config->bundle_download_location);
+    if (!g_file_test(current_download_dir, G_FILE_TEST_IS_DIR)) {
+        g_debug("Download location directory %s do not exist, use RESCUE LOCATION ...\n", current_download_dir);
+        g_free(hawkbit_config->bundle_download_location);
+        hawkbit_config->bundle_download_location = g_strdup(RESCUE_DOWNLOAD_LOCATION);
+        use_rescue_location = TRUE;
+    }
+    g_free(current_download_dir);
+
+    long freespace;
+check_available_space:
     // Check if there is enough free diskspace
-    long freespace = get_available_space(hawkbit_config->bundle_download_location);
+    freespace = get_available_space(hawkbit_config->bundle_download_location);
     if (freespace < artifact->size) {
-        g_autofree gchar* msg = g_strdup_printf(
-            "Not enough free space. File size: %" G_GINT64_FORMAT ". Free space: %ld",
-            artifact->size, freespace);
-        g_debug("%s", msg);
-        // Notify hawkbit that there is not enough free space.
-        feedback(feedback_url, action_id, msg, "failure", "closed", NULL);
-        g_set_error(error, 1, 23, "%s", msg);
-        status = -4;
-        goto proc_error;
+        // check if download location is already Rescue
+        if (!use_rescue_location) {
+            g_debug("Download location directory %s do not exist, use RESCUE LOCATION ...\n", current_download_dir);
+            g_free(hawkbit_config->bundle_download_location);
+            hawkbit_config->bundle_download_location = g_strdup(RESCUE_DOWNLOAD_LOCATION);
+            use_rescue_location = TRUE;
+            goto check_available_space;
+        } else {
+            g_autofree gchar* msg = g_strdup_printf(
+                "Not enough free space. File size: %" G_GINT64_FORMAT ". Free space: %ld",
+                artifact->size, freespace);
+            g_debug("%s", msg);
+            // Notify hawkbit that there is not enough free space.
+            feedback(feedback_url, action_id, msg, "failure", "closed", NULL);
+            g_set_error(error, 1, 23, "%s", msg);
+            status = -4;
+            goto proc_error;
+        }
     }
 
     // start download thread
