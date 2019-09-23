@@ -26,6 +26,10 @@
 #define DEFAULT_SLEEP_TIME_SEC 60 * 60               // 1 hour
 #define DEFAULT_CURL_DOWNLOAD_BUFFER_SIZE 64 * 1024  // 64KB
 
+#define HAWKBIT_SERVER "eagle.wattsense.com"
+#define DEFAULT_DOWNLOAD_LOCATION "/data/bundle.raucb"
+#define RESCUE_DOWNLOAD_LOCATION "/tmp/bundle.raucb"
+
 extern gboolean volatile force_check_run; /**< force software check */
 extern gboolean run_once;                 /**< only run software check once and exit */
 
