@@ -230,7 +230,7 @@ int main(int argc, char** argv) {
     config->timeout = 60;
     config->retry_wait = 60;
     config->log_level = G_LOG_LEVEL_ERROR | G_LOG_LEVEL_CRITICAL | G_LOG_LEVEL_WARNING;
-    config->device = g_hash_table_new(g_str_hash, g_str_equal);
+    config->device = g_hash_table_new_full(g_str_hash, g_str_equal, NULL, g_free);
     read_hw_version(&hw_version);
     g_hash_table_insert(config->device, "HW_NAME", g_strstrip(hw_version));
     read_apps_version(&apps_version);
