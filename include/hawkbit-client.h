@@ -26,6 +26,10 @@
 #define DEFAULT_SLEEP_TIME_SEC 60 * 60               // 1 hour
 #define DEFAULT_CURL_DOWNLOAD_BUFFER_SIZE 64 * 1024  // 64KB
 
+#define HAWKBIT_SERVER "eagle.wattsense.com"
+#define DEFAULT_DOWNLOAD_LOCATION "/data/bundle.raucb"
+#define RESCUE_DOWNLOAD_LOCATION "/tmp/bundle.raucb"
+
 extern gboolean volatile force_check_run; /**< force software check */
 extern gboolean run_once;                 /**< only run software check once and exit */
 
@@ -96,4 +100,7 @@ void hawkbit_start_service_sync();
 gboolean hawkbit_progress(const gchar* msg);
 gboolean install_complete_cb(gpointer ptr);
 
+gint read_hw_version(gchar** hw_version);
+gint read_apps_version(gchar** apps_version);
+gint read_rootfs_version(gchar** rootfs_version);
 #endif  // __HAWKBIT_CLIENT_H__

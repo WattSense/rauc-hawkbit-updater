@@ -111,6 +111,10 @@ gint get_binary(const gchar* download_url,
     /* abort if slower than 100 bytes/sec during 60 seconds */
     curl_easy_setopt(curl, CURLOPT_LOW_SPEED_TIME, 60L);
     curl_easy_setopt(curl, CURLOPT_LOW_SPEED_LIMIT, 100L);
+
+    /* BOX-576: Limit speed to 100kB/s */
+    curl_easy_setopt(curl, CURLOPT_MAX_RECV_SPEED_LARGE, (curl_off_t)100000);
+
     // Setup request headers
     struct curl_slist* headers = NULL;
     headers = curl_slist_append(headers, "Accept: application/octet-stream");
@@ -433,10 +437,22 @@ gboolean hawkbit_progress(const gchar* msg) {
 }
 
 gboolean identify(GError** error) {
+    gchar* hw_version;
+    gchar* apps_version;
+    gchar* apps_rootfs;
+
     g_debug("Identifying ourself to hawkbit server");
     g_autofree gchar* put_config_data_url =
         build_api_url(g_strdup_printf("/%s/controller/v1/%s/configData", hawkbit_config->tenant_id,
                                       hawkbit_config->controller_id));
+
+    /* Update versions */
+    read_hw_version(&hw_version);
+    g_hash_table_replace(hawkbit_config->device, "HW_NAME", g_strstrip(hw_version));
+    read_apps_version(&apps_version);
+    g_hash_table_replace(hawkbit_config->device, "APP_VERS", g_strstrip(apps_version));
+    read_rootfs_version(&apps_rootfs);
+    g_hash_table_replace(hawkbit_config->device, "ROOTFS_VERS", g_strstrip(apps_rootfs));
 
     JsonBuilder* builder = json_builder_new();
     json_build_status(builder, NULL, NULL, "success", "closed", hawkbit_config->device, FALSE);
@@ -556,6 +572,7 @@ down_error:
 
 gboolean process_deployment(JsonNode* req_root, GError** error) {
     struct artifact* artifact = NULL;
+    gboolean use_rescue_location = FALSE;
 
     if (action_id) {
         g_warning("Deployment is already in progress...");
@@ -641,18 +658,41 @@ gboolean process_deployment(JsonNode* req_root, GError** error) {
               ", URL: %s)",
               artifact->name, artifact->version, artifact->size, artifact->download_url);
 
+    // Wattsense: test if directory exists if not change location to RESCUE Location
+    gchar* current_download_dir = NULL;
+
+    current_download_dir = g_path_get_dirname(hawkbit_config->bundle_download_location);
+    if (!g_file_test(current_download_dir, G_FILE_TEST_IS_DIR)) {
+        g_debug("Download location directory %s do not exist, use RESCUE LOCATION ...\n", current_download_dir);
+        g_free(hawkbit_config->bundle_download_location);
+        hawkbit_config->bundle_download_location = g_strdup(RESCUE_DOWNLOAD_LOCATION);
+        use_rescue_location = TRUE;
+    }
+    g_free(current_download_dir);
+
+    long freespace;
+check_available_space:
     // Check if there is enough free diskspace
-    long freespace = get_available_space(hawkbit_config->bundle_download_location);
+    freespace = get_available_space(hawkbit_config->bundle_download_location);
     if (freespace < artifact->size) {
-        g_autofree gchar* msg = g_strdup_printf(
-            "Not enough free space. File size: %" G_GINT64_FORMAT ". Free space: %ld",
-            artifact->size, freespace);
-        g_debug("%s", msg);
-        // Notify hawkbit that there is not enough free space.
-        feedback(feedback_url, action_id, msg, "failure", "closed", NULL);
-        g_set_error(error, 1, 23, "%s", msg);
-        status = -4;
-        goto proc_error;
+        // check if download location is already Rescue
+        if (!use_rescue_location) {
+            g_debug("Download location directory %s do not exist, use RESCUE LOCATION ...\n", current_download_dir);
+            g_free(hawkbit_config->bundle_download_location);
+            hawkbit_config->bundle_download_location = g_strdup(RESCUE_DOWNLOAD_LOCATION);
+            use_rescue_location = TRUE;
+            goto check_available_space;
+        } else {
+            g_autofree gchar* msg = g_strdup_printf(
+                "Not enough free space. File size: %" G_GINT64_FORMAT ". Free space: %ld",
+                artifact->size, freespace);
+            g_debug("%s", msg);
+            // Notify hawkbit that there is not enough free space.
+            feedback(feedback_url, action_id, msg, "failure", "closed", NULL);
+            g_set_error(error, 1, 23, "%s", msg);
+            status = -4;
+            goto proc_error;
+        }
     }
 
     // start download thread
@@ -687,8 +727,9 @@ static gboolean hawkbit_pull_cb(gpointer data) {
         "/%s/controller/v1/%s", hawkbit_config->tenant_id, hawkbit_config->controller_id));
     GError* error = NULL;
     JsonParser* json_response_parser = NULL;
-
+#if 0 // disable message too garrulous
     g_message("Checking for new software...");
+#endif
     int status = rest_request(GET, get_tasks_url, NULL, &json_response_parser, &error);
     if (status == 200) {
         if (json_response_parser) {
@@ -705,9 +746,12 @@ static gboolean hawkbit_pull_cb(gpointer data) {
             if (json_contains(json_root, "$._links.deploymentBase")) {
                 // hawkBit has a new deployment for us
                 process_deployment(json_root, &error);
-            } else {
+            }
+#if 0 // disable message too garrulous
+            else {
                 g_message("No new software.");
             }
+#endif
             if (json_contains(json_root, "$._links.cancelAction")) {
                 //TODO: implement me
                 g_warning("cancel action not supported");
