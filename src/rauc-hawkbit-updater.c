@@ -13,9 +13,9 @@
 #include <sys/utsname.h>
 #include <unistd.h>
 #include "config-file.h"
+#include "device_id.h"
 #include "hawkbit-client.h"
 #include "log.h"
-#include "device_id.h"
 #include "rauc-installer.h"
 
 #define PROGRAM "rauc-hawkbit-updater"
@@ -248,13 +248,14 @@ int main(int argc, char** argv) {
     setup_logging(PROGRAM, log_level, opt_output_systemd);
     hawkbit_init(config, on_new_software_ready_cb);
 
-    identify(); /* Identify ourselve to push new attibuts */
+    identify(); /* Identify ourselves to push new attributes */
     force_check_run = true;
     hawkbit_start_service_sync();
 
 #ifndef WATTSENSE
     config_file_free(config);
 #endif
+    hawkbit_close();
 
 out:
     g_option_context_free(context);

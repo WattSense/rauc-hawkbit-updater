@@ -11,12 +11,16 @@
  */
 
 #include "hawkbit-client.h"
+#include <stdbool.h>
 
 gboolean volatile force_check_run = FALSE;
 gboolean run_once = FALSE;
 
-/* Duration of the process before quiting, this is to prevent any memory leak */
-#define MAX_DURATION_SEC 3600*24 /* exit every 24 hrs */
+#define REQUEST_POLLING_FILE "/tmp/hawkbit_poll"
+#define MINIMAL_POLLING_PERIOD 300 /* 5 min */
+
+/* Duration of the process before quitting, this is to prevent any memory leak */
+#define MAX_DURATION_SEC 3600 * 24 /* exit every 24 hrs */
 
 /**
  * @brief String representation of HTTP methods.
@@ -156,8 +160,6 @@ gint get_binary(const gchar* download_url,
     g_strfreev(download_url_split);
     fclose(fp);
 
-    curl_global_cleanup();
-
     return http_code;
 }
 
@@ -197,33 +199,37 @@ gint rest_request(enum HTTPMethod method,
                   JsonBuilder* jsonRequestBody,
                   JsonParser** jsonResponseParser,
                   GError** error) {
+    gboolean request_error = false;
     gchar* postdata = NULL;
     struct rest_payload fetch_buffer;
 
-    CURL* curl = curl_easy_init();
-    if (!curl)
+    static CURL* curl_request = NULL;
+
+    if (curl_request == NULL)
+        curl_request = curl_easy_init();
+
+    if (!curl_request)
         return -1;
 
     // init response buffer
     fetch_buffer.payload = g_malloc0(DEFAULT_CURL_REQUEST_BUFFER_SIZE);
     if (fetch_buffer.payload == NULL) {
         g_debug("Failed to expand buffer");
-        curl_easy_cleanup(curl);
         return -1;
     }
     fetch_buffer.size = 0;
 
     // setup CURL options
-    curl_easy_setopt(curl, CURLOPT_URL, url);
-    curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
-    curl_easy_setopt(curl, CURLOPT_USERAGENT, HAWKBIT_USERAGENT);
-    curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, HTTPMethod_STRING[method]);
-    curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, hawkbit_config->connect_timeout);
-    curl_easy_setopt(curl, CURLOPT_TIMEOUT, hawkbit_config->timeout);
-    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, curl_write_cb);
-    curl_easy_setopt(curl, CURLOPT_WRITEDATA, (void*)&fetch_buffer);
-    curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, hawkbit_config->ssl_verify ? 1L : 0L);
-    curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, hawkbit_config->ssl_verify ? 1L : 0L);
+    curl_easy_setopt(curl_request, CURLOPT_URL, url);
+    curl_easy_setopt(curl_request, CURLOPT_FOLLOWLOCATION, 1L);
+    curl_easy_setopt(curl_request, CURLOPT_USERAGENT, HAWKBIT_USERAGENT);
+    curl_easy_setopt(curl_request, CURLOPT_CUSTOMREQUEST, HTTPMethod_STRING[method]);
+    curl_easy_setopt(curl_request, CURLOPT_CONNECTTIMEOUT, hawkbit_config->connect_timeout);
+    curl_easy_setopt(curl_request, CURLOPT_TIMEOUT, hawkbit_config->timeout);
+    curl_easy_setopt(curl_request, CURLOPT_WRITEFUNCTION, curl_write_cb);
+    curl_easy_setopt(curl_request, CURLOPT_WRITEDATA, (void*)&fetch_buffer);
+    curl_easy_setopt(curl_request, CURLOPT_SSL_VERIFYPEER, hawkbit_config->ssl_verify ? 1L : 0L);
+    curl_easy_setopt(curl_request, CURLOPT_SSL_VERIFYHOST, hawkbit_config->ssl_verify ? 1L : 0L);
 
     if (jsonRequestBody) {
         // Convert request into a string
@@ -232,7 +238,7 @@ gint rest_request(enum HTTPMethod method,
         gsize length;
         postdata = json_generator_to_data(generator, &length);
         g_object_unref(generator);
-        curl_easy_setopt(curl, CURLOPT_POSTFIELDS, postdata);
+        curl_easy_setopt(curl_request, CURLOPT_POSTFIELDS, postdata);
         g_debug("Request body: %s\n", postdata);
     }
 
@@ -248,12 +254,12 @@ gint rest_request(enum HTTPMethod method,
     if (jsonRequestBody) {
         headers = curl_slist_append(headers, "Content-Type: application/json;charset=UTF-8");
     }
-    curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
+    curl_easy_setopt(curl_request, CURLOPT_HTTPHEADER, headers);
 
     // perform request
-    CURLcode res = curl_easy_perform(curl);
+    CURLcode res = curl_easy_perform(curl_request);
     int http_code = 0;
-    curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http_code);
+    curl_easy_getinfo(curl_request, CURLINFO_RESPONSE_CODE, &http_code);
     if (res == CURLE_OK && http_code == 200) {
         if (jsonResponseParser && fetch_buffer.size > 0) {
             JsonParser* parser = json_parser_new_immutable();
@@ -267,11 +273,13 @@ gint rest_request(enum HTTPMethod method,
         }
     } else if (res == CURLE_OPERATION_TIMEDOUT) {
         // libcurl was able to complete a TCP connection to the origin server, but did not receive a timely HTTP response.
+        request_error = true;
         http_code = 524;
         g_set_error(error,
                     1,  // error domain
                     http_code, "HTTP request timed out: %s", curl_easy_strerror(res));
     } else {
+        request_error = true;
         g_set_error(error,
                     1,  // error domain
                     http_code, "HTTP request failed: %s", curl_easy_strerror(res));
@@ -280,7 +288,9 @@ gint rest_request(enum HTTPMethod method,
     g_debug("Response body: %s\n", fetch_buffer.payload);
 
     curl_slist_free_all(headers);
-    curl_easy_cleanup(curl);
+
+    if (request_error)
+        curl_easy_cleanup(curl_request);
 
     g_free(fetch_buffer.payload);
     g_free(postdata);
@@ -463,7 +473,7 @@ gboolean identify(GError** error) {
 
     g_debug("Identifying ourself to hawkbit server");
     gchar* path = g_strdup_printf("/%s/controller/v1/%s/configData", hawkbit_config->tenant_id,
-            hawkbit_config->controller_id);
+                                  hawkbit_config->controller_id);
     gchar* put_config_data_url = build_api_url(path);
     g_free(path);
 
@@ -568,7 +578,7 @@ gpointer download_thread(gpointer data) {
         (artifact->size / ((double)(end_time - start_time) / 1000000)) / (1024 * 1024));
     feedback_progress(artifact->feedback_url, action_id, 1, msg, NULL);
     g_message("%s", msg);
-	g_free(msg);
+    g_free(msg);
 
     // validate checksum
     if (g_strcmp0(artifact->sha1, checksum.checksum_result)) {
@@ -624,13 +634,15 @@ gboolean process_deployment(JsonNode* req_root, GError** error) {
     g_free(deployment);
 
     // build urls for deployment resource info
-    gchar *path = g_strdup_printf("/%s/controller/v1/%s/deploymentBase/%s?c=%s", hawkbit_config->tenant_id,
-            hawkbit_config->controller_id, action_id, resource_id);
+    gchar* path =
+        g_strdup_printf("/%s/controller/v1/%s/deploymentBase/%s?c=%s", hawkbit_config->tenant_id,
+                        hawkbit_config->controller_id, action_id, resource_id);
     g_free(resource_id);
     gchar* get_resource_url = build_api_url(path);
     g_free(path);
-    gchar *path_fb = g_strdup_printf("/%s/controller/v1/%s/deploymentBase/%s/feedback",
-            hawkbit_config->tenant_id, hawkbit_config->controller_id, action_id);
+    gchar* path_fb =
+        g_strdup_printf("/%s/controller/v1/%s/deploymentBase/%s/feedback",
+                        hawkbit_config->tenant_id, hawkbit_config->controller_id, action_id);
     gchar* feedback_url = build_api_url(path_fb);
     g_free(path_fb);
 
@@ -693,7 +705,8 @@ gboolean process_deployment(JsonNode* req_root, GError** error) {
 
     current_download_dir = g_path_get_dirname(hawkbit_config->bundle_download_location);
     if (!g_file_test(current_download_dir, G_FILE_TEST_IS_DIR)) {
-        g_debug("Download location directory %s do not exist, use RESCUE LOCATION ...\n", current_download_dir);
+        g_debug("Download location directory %s do not exist, use RESCUE LOCATION ...\n",
+                current_download_dir);
         g_free(hawkbit_config->bundle_download_location);
         hawkbit_config->bundle_download_location = g_strdup(RESCUE_DOWNLOAD_LOCATION);
         use_rescue_location = TRUE;
@@ -707,15 +720,16 @@ check_available_space:
     if (freespace < artifact->size) {
         // check if download location is already Rescue
         if (!use_rescue_location) {
-            g_debug("Download location directory %s do not exist, use RESCUE LOCATION ...\n", current_download_dir);
+            g_debug("Download location directory %s do not exist, use RESCUE LOCATION ...\n",
+                    current_download_dir);
             g_free(hawkbit_config->bundle_download_location);
             hawkbit_config->bundle_download_location = g_strdup(RESCUE_DOWNLOAD_LOCATION);
             use_rescue_location = TRUE;
             goto check_available_space;
         } else {
-            gchar* msg = g_strdup_printf(
-                "Not enough free space. File size: %" G_GINT64_FORMAT ". Free space: %ld",
-                artifact->size, freespace);
+            gchar* msg = g_strdup_printf("Not enough free space. File size: %" G_GINT64_FORMAT
+                                         ". Free space: %ld",
+                                         artifact->size, freespace);
             g_debug("%s", msg);
             // Notify hawkbit that there is not enough free space.
             feedback(feedback_url, action_id, msg, "failure", "closed", NULL);
@@ -746,32 +760,43 @@ void hawkbit_init(struct config* config, GSourceFunc on_install_ready) {
     curl_global_init(CURL_GLOBAL_ALL);
 }
 
+void hawkbit_close(void) {
+    curl_global_cleanup();
+}
+
 static gboolean hawkbit_pull_cb(gpointer data) {
     if (!force_check_run) {
-    	/* hawkbit_pull_cb is called every 10 sec */
-    	last_run_sec += 10;
-    	first_run_sec += 10;
+        /* hawkbit_pull_cb is called every 10 sec */
+        last_run_sec += 10;
+        first_run_sec += 10;
 
-    	/* exit after MAX_DURATION_SEC */
-    	if ( first_run_sec > MAX_DURATION_SEC) {
-    		g_main_loop_quit(data);
-    		return G_SOURCE_REMOVE;
-    	}
+        /* exit after MAX_DURATION_SEC */
+        if (first_run_sec > MAX_DURATION_SEC) {
+            g_main_loop_quit(data);
+            return G_SOURCE_REMOVE;
+        }
 
-    	if (last_run_sec < sleep_time)
-    		return G_SOURCE_CONTINUE;
+        /* Test if polling is required immediately */
+        if (g_file_test(REQUEST_POLLING_FILE, G_FILE_TEST_EXISTS)) {
+            g_unlink(REQUEST_POLLING_FILE);
+            g_message("Force polling requested");
+        } else {
+            if (last_run_sec < sleep_time)
+                return G_SOURCE_CONTINUE;
+        }
     }
 
     force_check_run = FALSE;
     last_run_sec = 0;
 
     // build hawkBit get tasks URL
-    gchar *path = g_strdup_printf("/%s/controller/v1/%s", hawkbit_config->tenant_id, hawkbit_config->controller_id);
+    gchar* path = g_strdup_printf("/%s/controller/v1/%s", hawkbit_config->tenant_id,
+                                  hawkbit_config->controller_id);
     gchar* get_tasks_url = build_api_url(path);
     g_free(path);
     GError* error = NULL;
     JsonParser* json_response_parser = NULL;
-#if 0 // disable message too garrulous
+#if 0  // disable message too garrulous
     g_message("Checking for new software...");
 #endif
     int status = rest_request(GET, get_tasks_url, NULL, &json_response_parser, &error);
@@ -792,7 +817,7 @@ static gboolean hawkbit_pull_cb(gpointer data) {
                 // hawkBit has a new deployment for us
                 process_deployment(json_root, &error);
             }
-#if 0 // disable message too garrulous
+#if 0  // disable message too garrulous
             else {
                 g_message("No new software.");
             }
@@ -808,8 +833,12 @@ static gboolean hawkbit_pull_cb(gpointer data) {
         if (error)
             g_critical("Error: %s", error->message);
 
-        // sleep as long as specified by hawkbit
-        sleep_time = hawkbit_interval_check_sec;
+        // sleep as long as specified by hawkbit with minimal period checking
+        if (sleep_time < MINIMAL_POLLING_PERIOD)
+            sleep_time = MINIMAL_POLLING_PERIOD;
+        else
+            sleep_time = hawkbit_interval_check_sec;
+
     } else if (status == 401) {
         g_critical("Failed to authenticate. Check if auth_token is correct?");
         sleep_time = hawkbit_config->retry_wait;
