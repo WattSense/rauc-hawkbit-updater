@@ -289,8 +289,10 @@ gint rest_request(enum HTTPMethod method,
 
     curl_slist_free_all(headers);
 
-    if (request_error)
+    if (request_error) {
         curl_easy_cleanup(curl_request);
+        curl_request = NULL;
+    }
 
     g_free(fetch_buffer.payload);
     g_free(postdata);
